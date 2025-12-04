@@ -1,5 +1,6 @@
 from ytmusicapi import YTMusic
 import subprocess
+import helpers.player as plr
 
 title = "search <query> <results_num=30>"
 alias = ["query", "q", "s"]
@@ -36,14 +37,7 @@ def main(root, query=None, results_num=30):
         action = root.pick(actions)
         if action != len(actions):
             if action == actions.index("Play now"):
-                video_id = song["videoId"]
-                url = f"https://music.youtube.com/watch?v={video_id}"
-                
-                subprocess.Popen([
-                    'mpv',
-                    '--no-video',
-                    '--ytdl-format=bestaudio',
-                    url
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                player = plr.load(root)
+                player.play(song["videoId"])
     else:
         root.error("invalid song")

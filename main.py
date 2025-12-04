@@ -2,9 +2,6 @@ import os
 import colorama as c
 import sys
 import importlib.util as iutil
-import time
-import traceback
-import subprocess
 import shlex
 
 from pathlib import Path
@@ -196,9 +193,14 @@ def _login(root):
     module, _ = read_command("sync")
     return module.login(root)
 
+def setg(g, v):
+    saved_globals[g] = v
+
 # Loop
 
 queued_logs = []
+saved_globals = {}
+
 while True:
     upd()
 
@@ -223,7 +225,9 @@ while True:
                     "pick": lambda c: pick(c),
                     "clear": lambda: clear(),
                     "clear_logs": lambda: queued_logs.clear(),
-                    "login": lambda root: _login(root)
+                    "login": lambda root: _login(root),
+                    "getg": lambda g: saved_globals.get(g),
+                    "setg": lambda g, v: setg(g, v),
                 }), **kwargs)
         except Exception as e:
             queued_logs.append(error(f"module err: {e}", True))
