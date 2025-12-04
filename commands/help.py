@@ -12,6 +12,6 @@ def main(root):
     files = list(folder.glob("*.py"))
 
     for file_path in files:
-        module = root.read_command(file_path.name.replace(".py", ""))
+        module, _ = root.read_command(file_path.name.replace(".py", ""))
         if not module == None:
             out(module.title + f"{ f" ({", ".join(module.alias)})" if hasattr(module, "alias") else "" }" + " - " + module.description)

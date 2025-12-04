@@ -1,7 +1,49 @@
-title = "search"
+from ytmusicapi import YTMusic
+import subprocess
+
+title = "search <query> <results_num=30>"
 alias = ["query", "q", "s"]
 description = "performs a search for a song from YTM"
 
-def main(root):
+def main(root, query=None, results_num=30):
     yt = root.login(root)
-    root.print(yt)
+    if yt == None:
+        root.error("Must be logged in with YTM to continue")
+        return
+    results = yt.search(query=query, filter="songs", limit=results_num)
+    
+    choices = []
+    for song in results:
+        choices.append("\n".join([
+            f"Title: {song["title"]}",
+            f"Duration: {song["duration"]}",
+            f"Artist(s): {song["artist"] if hasattr(song, "artist") else ", ".join([artist["name"] for artist in song["artists"]])}"
+        ]))
+
+    choice = root.pick(choices)
+    song = results[choice]
+
+    if song:
+        actions = [
+            "Play now",
+            "Play next",
+            "Add to queue",
+            "Like",
+            "Add to playlist",
+            "Exit"
+        ]
+
+        action = root.pick(actions)
+        if action != len(actions):
+            if action == actions.index("Play now"):
+                video_id = song["videoId"]
+                url = f"https://music.youtube.com/watch?v={video_id}"
+                
+                subprocess.Popen([
+                    'mpv',
+                    '--no-video',
+                    '--ytdl-format=bestaudio',
+                    url
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        root.error("invalid song")

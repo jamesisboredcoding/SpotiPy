@@ -5,6 +5,7 @@ import importlib.util as iutil
 import time
 import traceback
 import subprocess
+import shlex
 
 from pathlib import Path
 from pynput import keyboard
@@ -56,9 +57,59 @@ def send(content):
         tprint(line)
     tprint("\n   " + "—"*50)
 
-def read_command(command):
+def parse_arguments(command_input, title):
     try:
+        import re
+        arg_pattern = r'<([^>]+)>'
+        arg_definitions = re.findall(arg_pattern, title)
+        
+        args_info = []
+        for arg_def in arg_definitions:
+            if '=' in arg_def:
+                name, default = arg_def.split('=', 1)
+                args_info.append((name, default))
+            else:
+                args_info.append((arg_def, None))
+        
+        parts = shlex.split(command_input)
+        command_name = parts[0] if parts else ""
+        provided_args = parts[1:] if len(parts) > 1 else []
+        
+        kwargs = {}
+        for i, (arg_name, default) in enumerate(args_info):
+            if i < len(provided_args):
+                value = provided_args[i]
+                try:
+                    value = int(value)
+                except ValueError:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        pass
+                kwargs[arg_name] = value
+            elif default is not None:
+                try:
+                    kwargs[arg_name] = int(default)
+                except ValueError:
+                    try:
+                        kwargs[arg_name] = float(default)
+                    except ValueError:
+                        kwargs[arg_name] = default
+            else:
+                kwargs[arg_name] = None
+        
+        return kwargs
+    except Exception as e:
+        error(f"arg parse fail: {e}")
+        return {}
+
+def read_command(command_input):
+    try:
+        command = shlex.split(command_input)[0] if command_input else ""
+        
         script_path = Path("./commands") / (command + ".py")
+        actual_command_name = command
+        
         if not script_path.exists():
             commands_dir = Path("./commands")
             for file in commands_dir.glob("*.py"):
@@ -69,25 +120,30 @@ def read_command(command):
                     
                     if hasattr(temp_module, 'alias') and command in temp_module.alias:
                         script_path = file
-                        command = file.stem
+                        actual_command_name = file.stem
                         break
                 except:
                     continue
         
         if not script_path.exists():
             error(f"Command '{command}' not found")
-            return None
+            return None, {}
             
-        spec = iutil.spec_from_file_location(command, script_path)
+        spec = iutil.spec_from_file_location(actual_command_name, script_path)
         module = iutil.module_from_spec(spec)
 
-        sys.modules[command] = module
+        sys.modules[actual_command_name] = module
         spec.loader.exec_module(module)
-        return module
+        
+        kwargs = {}
+        if hasattr(module, 'title'):
+            kwargs = parse_arguments(command_input, module.title)
+        
+        return module, kwargs
         
     except Exception as e:
         error(f"cmd read fail: {e}")
-        return None
+        return None, {}
 
 def pick(choices):
     last = buffer.copy()
@@ -123,6 +179,9 @@ def pick(choices):
 
     with keyboard.Listener(on_press=on_press) as listener:
         listener.join()
+
+    clear()
+    for l in last: tprint(l)
     return target
 
 def upd():
@@ -132,6 +191,10 @@ def upd():
         f"   {ws("Artist:", 10)}Eminem",
         f"   {ws("Time:", 10)}{c.Fore.LIGHTCYAN_EX + "—"*20 + c.Fore.LIGHTBLACK_EX + "—"*10 + c.Fore.RESET} 2:45 / 6:52"
     ]); tprint("")
+
+def _login(root):
+    module, _ = read_command("sync")
+    return module.login(root)
 
 # Loop
 
@@ -144,7 +207,7 @@ while True:
     if len(queued_logs) > 0: tprint("")
 
     command = tinput(c.Fore.LIGHTGREEN_EX + "  > " + c.Fore.WHITE)
-    module = read_command(command)
+    module, kwargs = read_command(command)
 
     if module:
         try:
@@ -152,6 +215,7 @@ while True:
                 error(f"cmd init fail: {command} has no main init function")
             else:
                 module.main(AttrDict({
+                    "send": lambda s: send(s),
                     "print": lambda content: queued_logs.append(content),
                     "error": lambda e: queued_logs.append(error(e, True)),
                     "read_command": lambda command: read_command(command),
@@ -159,7 +223,7 @@ while True:
                     "pick": lambda c: pick(c),
                     "clear": lambda: clear(),
                     "clear_logs": lambda: queued_logs.clear(),
-                    "login": lambda root: read_command("sync").login(root)
-                }))
+                    "login": lambda root: _login(root)
+                }), **kwargs)
         except Exception as e:
             queued_logs.append(error(f"module err: {e}", True))
