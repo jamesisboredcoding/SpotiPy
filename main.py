@@ -3,6 +3,8 @@ import colorama as c
 import sys
 import importlib.util as iutil
 import shlex
+import time
+import threading
 
 from pathlib import Path
 from pynput import keyboard
@@ -12,6 +14,18 @@ from pynput import keyboard
 print("\033]0;SpotiPy CLI\007", end="")
 
 buffer = []
+queued_logs = []
+saved_globals = {}
+in_input = False
+current_song = {
+    "title": "Nothing playing",
+    "artists": ["—"],
+    "position": 0,
+    "duration": 0,
+    "is_playing": False,
+    "looped": False,
+    "looped_playlist": False,
+}
 
 # Classes
 
@@ -72,26 +86,30 @@ def parse_arguments(command_input, title):
         command_name = parts[0] if parts else ""
         provided_args = parts[1:] if len(parts) > 1 else []
         
+        def convert_value(value):
+            if value.lower() in ('true', 'yes', '1', 'on'):
+                return True
+            if value.lower() in ('false', 'no', '0', 'off'):
+                return False
+            
+            try:
+                return int(value)
+            except ValueError:
+                pass
+            
+            try:
+                return float(value)
+            except ValueError:
+                pass
+            
+            return value
+        
         kwargs = {}
         for i, (arg_name, default) in enumerate(args_info):
             if i < len(provided_args):
-                value = provided_args[i]
-                try:
-                    value = int(value)
-                except ValueError:
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        pass
-                kwargs[arg_name] = value
+                kwargs[arg_name] = convert_value(provided_args[i])
             elif default is not None:
-                try:
-                    kwargs[arg_name] = int(default)
-                except ValueError:
-                    try:
-                        kwargs[arg_name] = float(default)
-                    except ValueError:
-                        kwargs[arg_name] = default
+                kwargs[arg_name] = convert_value(default)
             else:
                 kwargs[arg_name] = None
         
@@ -163,53 +181,110 @@ def pick(choices):
 
         if key == keyboard.Key.up:
             target = (target - 1) % len(choices)
-            clear()
-            for l in last: tprint(l)
+            redraw_screen()
             land(target)
         elif key == keyboard.Key.down:
             target = (target + 1) % len(choices)
-            clear()
-            for l in last: tprint(l)
+            redraw_screen()
             land(target)
 
+    redraw_screen()
     land(target)
 
     with keyboard.Listener(on_press=on_press) as listener:
         listener.join()
 
-    clear()
-    for l in last: tprint(l)
+    redraw_screen()
+    time.sleep(.5)
     return target
 
-def upd():
-    send([
-        f"   Currently playing:\n",
-        f"   {ws("Title:", 10)}Music",
-        f"   {ws("Artist:", 10)}Eminem",
-        f"   {ws("Time:", 10)}{c.Fore.LIGHTCYAN_EX + "—"*20 + c.Fore.LIGHTBLACK_EX + "—"*10 + c.Fore.RESET} 2:45 / 6:52"
-    ]); tprint("")
+# 
 
-def _login(root):
-    module, _ = read_command("sync")
-    return module.login(root)
+def format_time(seconds):
+    mins = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{mins}:{secs:02d}"
+
+def get_progress_bar(position, duration, width=30):
+    if duration == 0:
+        return c.Fore.LIGHTBLACK_EX + "—" * width + c.Fore.RESET
+    
+    progress = position / duration
+    filled = int(progress * width)
+    
+    bar = (c.Fore.LIGHTCYAN_EX + "—" * filled + 
+           c.Fore.LIGHTBLACK_EX + "—" * (width - filled) + 
+           c.Fore.RESET)
+    return bar
+
+def render_header():
+    pos_str = format_time(current_song["position"])
+    dur_str = format_time(current_song["duration"])
+    progress_bar = get_progress_bar(current_song["position"], current_song["duration"])
+    
+    lines = [
+        "",
+        f"{c.Fore.RESET}  Currently playing: {c.Fore.YELLOW}{"(looped)" if current_song["looped"] else "(looped playlist)" if current_song["looped_playlist"] else ""}{c.Fore.RESET}",
+        "",
+        f"  {ws('Title:', 15)}{current_song['title']}",
+        f"  {ws('Artist(s):', 15)}{", ".join(current_song['artists'])}",
+        f"  {ws('Time:', 15)}{progress_bar} {pos_str} / {dur_str}",
+        "",
+        f"  {'—'*50}",
+    ]
+    return lines
+
+def update_header():
+    sys.stdout.write("\033[s")
+    sys.stdout.write("\033[H")
+    
+    for line in render_header():
+        sys.stdout.write("\033[2K" + line + "\n")
+    
+    sys.stdout.write("\033[2K\n")
+    
+    sys.stdout.write("\033[u")
+    sys.stdout.flush()
+
+def redraw_screen():
+    clear()
+    
+    for line in render_header():
+        print(line)
+    print()
+    
+    for log in queued_logs:
+        print("   " + str(log))
+    if len(queued_logs) > 0:
+        print()
 
 def setg(g, v):
     saved_globals[g] = v
 
+def _input(c):
+    in_input = True
+    c = tinput(c)
+    in_input = False
+    return c
+
 # Loop
 
-queued_logs = []
-saved_globals = {}
+def update_thread():
+    while True:
+        if current_song["is_playing"] and current_song["position"] < current_song["duration"]:
+            current_song["position"] += 1
+        if in_input:
+            update_header()
+        time.sleep(1)
+
+threading.Thread(target=update_thread, daemon=True).start()
+redraw_screen()
 
 while True:
-    upd()
-
-    for log in queued_logs:
-        tprint("   " + str(log))
-    if len(queued_logs) > 0: tprint("")
-
+    in_input = True
     command = tinput(c.Fore.LIGHTGREEN_EX + "  > " + c.Fore.WHITE)
     module, kwargs = read_command(command)
+    in_input = False
 
     if module:
         try:
@@ -225,9 +300,21 @@ while True:
                     "pick": lambda c: pick(c),
                     "clear": lambda: clear(),
                     "clear_logs": lambda: queued_logs.clear(),
-                    "login": lambda root: _login(root),
                     "getg": lambda g: saved_globals.get(g),
                     "setg": lambda g, v: setg(g, v),
+                    "set_song": lambda title, artists, pos, dur: current_song.update({
+                        "title": title, "artists": artists, "position": pos, "duration": dur, "is_playing": True
+                    }),
+                    "stop_song": lambda: current_song.update({
+                        "title": "Nothing playing", "artists": ["—"], "position": 0, "duration": 0, "is_playing": False,
+                    }),
+                    "pause_song": lambda paused: current_song.update({"is_playing": not paused}),
+                    "edit_song": lambda e: current_song.update(e),
+                    "current": lambda: current_song.copy(),
+                    "redraw": lambda: redraw_screen(),
+                    "input": lambda c: _input(c)
                 }), **kwargs)
         except Exception as e:
             queued_logs.append(error(f"module err: {e}", True))
+
+    redraw_screen()

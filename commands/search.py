@@ -1,13 +1,12 @@
-from ytmusicapi import YTMusic
-import subprocess
 import helpers.player as plr
+import commands.sync as sync
 
 title = "search <query> <results_num=30>"
 alias = ["query", "q", "s"]
 description = "performs a search for a song from YTM"
 
 def main(root, query=None, results_num=30):
-    yt = root.login(root)
+    yt = sync.login(root)
     if yt == None:
         root.error("Must be logged in with YTM to continue")
         return

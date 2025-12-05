@@ -1,6 +1,7 @@
 title = "c"
-alias = ["clear"]
-description = "clears the CLI interface"
+alias = ["credits", "dev"]
+description = "logs the credits and developers for this project"
 
 def main(root):
-    root.clear_logs()
+    root.print("> Developed by @ApparentlyJames")
+    root.print("> With assistance from Claude, GPT")
