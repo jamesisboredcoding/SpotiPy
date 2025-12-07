@@ -1,24 +1,24 @@
 import helpers.player as plr
 import commands.sync as sync
 
-title = "search <query> <results_num=30>"
+title = "search <query>:string <results_num=30>:number <songs_only=True>:boolean"
 alias = ["query", "q", "s"]
 description = "performs a search for a song from YTM"
 
-def main(root, query=None, results_num=30):
+def main(root, query=None, results_num=30, songs_only=True):
     yt = sync.login(root)
     if yt == None:
         root.error("Must be logged in with YTM to continue")
         return
-    results = yt.search(query=query, filter="songs", limit=results_num)
     
+    songs = yt.search(query=query, filter="songs", limit=results_num)
+    videos = yt.search(query=query, filter="videos", limit=results_num)
+
+    results = songs if songs_only else songs + videos
     choices = []
+
     for song in results:
-        choices.append("\n".join([
-            f"Title: {song["title"]}",
-            f"Duration: {song["duration"]}",
-            f"Artist(s): {song["artist"] if hasattr(song, "artist") else ", ".join([artist["name"] for artist in song["artists"]])}"
-        ]))
+        choices.append(f"{song["title"]} by {song["artist"] if hasattr(song, "artist") else ", ".join([artist["name"] for artist in song["artists"]])}")
 
     choice = root.pick(choices)
     song = results[choice]
